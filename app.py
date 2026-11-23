@@ -2,411 +2,187 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import joblib
+from pathlib import Path
+from sklearn.neighbors import KNeighborsClassifier
 
-# ==========================================
+# =====================================
 # 1. KONFIGURASI HALAMAN
-# ==========================================
+# =====================================
 
 st.set_page_config(
-    page_title="Klasifikasi Bunga Iris",
+    page_title="Aplikasi Prediksi Iris",
     page_icon="🌸",
-    layout="wide"
+    layout="centered"
 )
 
-st.title("🌸 Klasifikasi Bunga Iris")
-st.write(
-    "Aplikasi klasifikasi bunga Iris menggunakan "
-    "algoritma k-Nearest Neighbors (k-NN) "
-    "dengan metode Euclidean Distance."
-)
+# Lokasi folder project
+BASE_DIR = Path(__file__).resolve().parent
 
-st.divider()
+# Nama file dataset dan model
+DATA_FILE = BASE_DIR / "data_training.csv"
+MODEL_FILE = BASE_DIR / "model_iris_knn.pkl"
 
-
-# ==========================================
-# 2. MEMBACA DATASET
-# ==========================================
-
-@st.cache_data
-def load_data():
-    training = pd.read_csv("data_training.csv")
-    testing = pd.read_csv("data_testing.csv")
-
-    return training, testing
-
-
-try:
-    training_df, testing_df = load_data()
-
-except FileNotFoundError:
-    st.error(
-        "File dataset tidak ditemukan. "
-        "Pastikan data_training.csv dan "
-        "data_testing.csv berada dalam folder app.py."
-    )
-    st.stop()
-
-
-# ==========================================
-# 3. MENENTUKAN ATRIBUT
-# ==========================================
-
-fitur = [
+# Fitur yang digunakan
+FITUR = [
     "SepalLengthCm",
     "SepalWidthCm",
     "PetalLengthCm",
     "PetalWidthCm"
 ]
 
-# Mengambil atribut data Training
-X_train = training_df[fitur].to_numpy(dtype=float)
+# =====================================
+# 2. MELATIH DAN MENYIMPAN MODEL KNN
+# =====================================
 
-# Mengambil kelas data Training
-kelas = training_df["Species"].to_numpy()
+@st.cache_resource
+def load_model():
 
-# Mengambil atribut data Testing
-X_test = testing_df[fitur].to_numpy(dtype=float)
+    # Membaca dataset training
+    data = pd.read_csv(DATA_FILE)
 
-# Mengambil kelas sebenarnya
-kelas_asli = testing_df["Species"].to_numpy()
+    # Memastikan semua fitur tersedia
+    for kolom in FITUR:
+        if kolom not in data.columns:
+            raise ValueError(
+                f"Kolom {kolom} tidak ditemukan dalam dataset."
+            )
 
-# Mengambil ID data Testing
-id_testing = testing_df["Id"].to_numpy()
+    # Mencari kolom kelas
+    kolom_kelas = [
+        kolom for kolom in data.columns
+        if kolom not in FITUR + ["Id", "Status"]
+        and not kolom.startswith("Unnamed:")
+    ]
 
-# Menentukan nilai K
-k = 3
-
-
-# ==========================================
-# 4. FUNGSI EUCLIDEAN DISTANCE
-# ==========================================
-
-def euclidean_distance(xi, yi):
-    return np.sqrt(np.sum((xi - yi) ** 2))
-
-
-# ==========================================
-# 5. FUNGSI ALGORITMA K-NN
-# ==========================================
-
-def k_nearest_neighbors(X_train, kelas, x_test, k):
-
-    distances = []
-
-    for i in range(len(X_train)):
-
-        distance = euclidean_distance(
-            x_test,
-            X_train[i]
+    if len(kolom_kelas) != 1:
+        raise ValueError(
+            "Kolom kelas tidak dapat ditentukan. "
+            f"Kolom yang ditemukan: {kolom_kelas}"
         )
 
-        distances.append(
-            (X_train[i], distance, kelas[i])
-        )
+    target = kolom_kelas[0]
 
-    # Mengurutkan berdasarkan jarak terkecil
-    distances.sort(key=lambda x: x[1])
+    # Memisahkan data fitur dan kelas
+    X_train = data[FITUR]
+    y_train = data[target]
 
-    # Mengambil K tetangga terdekat
-    neighbors = distances[:k]
+    # Memastikan jumlah data mencukupi
+    if len(X_train) < 3:
+        raise ValueError("Data training minimal harus memiliki 3 baris.")
 
-    # Menghitung suara setiap kelas
-    class_votes = {}
+    # Membuat model KNN dengan K=3
+    model = KNeighborsClassifier(n_neighbors=3)
 
-    for neighbor in neighbors:
+    # Melatih model
+    model.fit(X_train, y_train)
 
-        label = neighbor[2]
+    # Menyimpan model dalam format Pickle
+    joblib.dump(model, MODEL_FILE)
 
-        if label in class_votes:
-            class_votes[label] += 1
-        else:
-            class_votes[label] = 1
+    return model
 
-    # Menentukan kelas dengan suara terbanyak
-    prediction = max(
-        class_votes,
-        key=class_votes.get
+
+# =====================================
+# 3. MEMUAT MODEL
+# =====================================
+
+try:
+    model = load_model()
+
+except FileNotFoundError:
+    st.error(
+        "File data_training.csv tidak ditemukan. "
+        "Pastikan file berada satu folder dengan app.py."
     )
+    st.stop()
 
-    return prediction
-
-
-# ==========================================
-# 6. MELAKUKAN PREDIKSI DATA TESTING
-# ==========================================
-
-hasil_prediksi = []
-
-for i in range(len(X_test)):
-
-    klasifikasi = k_nearest_neighbors(
-        X_train,
-        kelas,
-        X_test[i],
-        k
-    )
-
-    hasil_prediksi.append(klasifikasi)
+except Exception as e:
+    st.error(f"Terjadi kesalahan saat memuat model: {e}")
+    st.stop()
 
 
-# ==========================================
-# 7. MENGHITUNG AKURASI
-# ==========================================
+# =====================================
+# 4. TAMPILAN APLIKASI
+# =====================================
 
-jumlah_benar = np.sum(
-    np.array(hasil_prediksi) == kelas_asli
-)
-
-akurasi = (
-    jumlah_benar / len(kelas_asli)
-) * 100
-
-
-# ==========================================
-# 8. MENAMPILKAN INFORMASI MODEL
-# ==========================================
-
-st.subheader("Informasi Model")
-
-col1, col2, col3 = st.columns(3)
-
-col1.metric(
-    "Data Training",
-    len(X_train)
-)
-
-col2.metric(
-    "Data Testing",
-    len(X_test)
-)
-
-col3.metric(
-    "Nilai K",
-    k
-)
-
-
-# ==========================================
-# 9. MENAMPILKAN HASIL EVALUASI
-# ==========================================
-
-st.subheader("Evaluasi Model")
-
-col1, col2 = st.columns(2)
-
-col1.metric(
-    "Akurasi Model",
-    f"{akurasi:.2f}%"
-)
-
-col2.metric(
-    "Prediksi Benar",
-    f"{jumlah_benar}/{len(kelas_asli)}"
-)
-
-
-# ==========================================
-# 10. TABEL HASIL PREDIKSI DATA TESTING
-# ==========================================
-
-st.subheader("Hasil Klasifikasi Data Testing")
-
-hasil_testing = pd.DataFrame({
-    "ID Testing": id_testing,
-    "Kelas Aktual": kelas_asli,
-    "Hasil Prediksi": hasil_prediksi
-})
-
-hasil_testing["Keterangan"] = np.where(
-    hasil_testing["Kelas Aktual"] ==
-    hasil_testing["Hasil Prediksi"],
-    "Benar",
-    "Salah"
-)
-
-st.dataframe(
-    hasil_testing,
-    use_container_width=True,
-    hide_index=True
-)
-
-
-# ==========================================
-# 11. MENAMPILKAN TETANGGA TERDEKAT
-# ==========================================
-
-st.subheader("3 Tetangga Terdekat Data Testing")
-
-for i in range(len(X_test)):
-
-    distances = []
-
-    for j in range(len(X_train)):
-
-        distance = euclidean_distance(
-            X_test[i],
-            X_train[j]
-        )
-
-        distances.append(
-            (distance, kelas[j])
-        )
-
-    distances.sort(key=lambda x: x[0])
-
-    neighbor_data = []
-
-    for urutan, neighbor in enumerate(
-        distances[:k],
-        start=1
-    ):
-
-        neighbor_data.append({
-            "Urutan": urutan,
-            "Species": neighbor[1],
-            "Jarak": round(neighbor[0], 6)
-        })
-
-    with st.expander(
-        f"ID Testing: {id_testing[i]}"
-    ):
-
-        st.dataframe(
-            pd.DataFrame(neighbor_data),
-            use_container_width=True,
-            hide_index=True
-        )
-
-
-# ==========================================
-# 12. FORM PREDIKSI DATA BARU
-# ==========================================
-
-st.divider()
-
-st.subheader("Prediksi Jenis Bunga Iris")
+st.title("Aplikasi Prediksi Iris - Model KNN")
 
 st.write(
-    "Masukkan empat nilai atribut bunga "
-    "untuk mengetahui hasil klasifikasinya."
+    "Masukkan nilai fitur untuk memprediksi jenis bunga Iris."
 )
 
-with st.form("form_prediksi"):
+# =====================================
+# 5. INPUT DATA PENGGUNA
+# =====================================
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        sepal_length = st.number_input(
-            "Sepal Length (cm)",
-            min_value=0.1,
-            value=5.1,
-            step=0.1
-        )
-
-        sepal_width = st.number_input(
-            "Sepal Width (cm)",
-            min_value=0.1,
-            value=3.5,
-            step=0.1
-        )
-
-    with col2:
-
-        petal_length = st.number_input(
-            "Petal Length (cm)",
-            min_value=0.1,
-            value=1.4,
-            step=0.1
-        )
-
-        petal_width = st.number_input(
-            "Petal Width (cm)",
-            min_value=0.1,
-            value=0.2,
-            step=0.1
-        )
-
-    submit = st.form_submit_button(
-        "Prediksi Sekarang",
-        use_container_width=True
-    )
-
-
-# ==========================================
-# 13. PROSES PREDIKSI DATA BARU
-# ==========================================
-
-if submit:
-
-    x_test = np.array([
-        sepal_length,
-        sepal_width,
-        petal_length,
-        petal_width
-    ])
-
-    prediction = k_nearest_neighbors(
-        X_train,
-        kelas,
-        x_test,
-        k
-    )
-
-    st.success(
-        f"Hasil Prediksi: {prediction}"
-    )
-
-    # Menghitung jarak seluruh data training
-    distances = []
-
-    for i in range(len(X_train)):
-
-        distance = euclidean_distance(
-            x_test,
-            X_train[i]
-        )
-
-        distances.append(
-            (distance, kelas[i])
-        )
-
-    # Mengurutkan jarak
-    distances.sort(key=lambda x: x[0])
-
-    # Mengambil 3 tetangga terdekat
-    neighbors = distances[:k]
-
-    neighbor_df = pd.DataFrame(
-        neighbors,
-        columns=["Jarak", "Species"]
-    )
-
-    neighbor_df.index = range(1, len(neighbor_df) + 1)
-    neighbor_df.index.name = "Urutan"
-
-    st.write("### 3 Tetangga Terdekat")
-
-    st.dataframe(
-        neighbor_df,
-        use_container_width=True
-    )
-
-    st.info(
-        "Hasil prediksi ditentukan berdasarkan "
-        "kelas dengan jumlah suara terbanyak "
-        "dari 3 tetangga terdekat."
-    )
-
-
-# ==========================================
-# 14. INFORMASI PENUTUP
-# ==========================================
-
-st.divider()
-
-st.caption(
-    "Aplikasi Klasifikasi Bunga Iris | "
-    "Metode k-Nearest Neighbors (k-NN) | "
-    "Euclidean Distance | K = 3"
+sepal_length = st.number_input(
+    "Sepal Length",
+    min_value=0.0,
+    max_value=10.0,
+    value=5.1,
+    step=0.1
 )
+
+sepal_width = st.number_input(
+    "Sepal Width",
+    min_value=0.0,
+    max_value=10.0,
+    value=3.5,
+    step=0.1
+)
+
+petal_length = st.number_input(
+    "Petal Length",
+    min_value=0.0,
+    max_value=10.0,
+    value=1.4,
+    step=0.1
+)
+
+petal_width = st.number_input(
+    "Petal Width",
+    min_value=0.0,
+    max_value=10.0,
+    value=0.2,
+    step=0.1
+)
+
+
+# =====================================
+# 6. PROSES PREDIKSI
+# =====================================
+
+if st.button("Prediksi"):
+
+    # Menggabungkan input menjadi satu data
+    data_baru = pd.DataFrame(
+        [[
+            sepal_length,
+            sepal_width,
+            petal_length,
+            petal_width
+        ]],
+        columns=FITUR
+    )
+
+    # Melakukan prediksi menggunakan model KNN
+    prediction = model.predict(data_baru)[0]
+
+    # Mengubah hasil prediksi menjadi nama kelas
+    label = str(prediction).lower()
+
+    if "setosa" in label or label == "1":
+        result = "Setosa"
+
+    elif "versicolor" in label or label == "2":
+        result = "Versicolor"
+
+    elif "virginica" in label or label == "3":
+        result = "Virginica"
+
+    else:
+        result = str(prediction)
+
+    # Menampilkan hasil prediksi
+    st.success(f"Hasil Prediksi: {result}")
